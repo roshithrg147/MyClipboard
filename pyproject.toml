@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "myclipboard"
+version = "2.0.0"
+description = "A robust, multi-threaded, secure enterprise-standard clipboard manager."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pyperclip>=1.8.2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+]
