@@ -1,0 +1,15 @@
+[Unit]
+Description=MyClipboard Enterprise Manager
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/env python3 -m app.main
+WorkingDirectory=/home/norwing/CodeBase/Projects/MyClipboard
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target

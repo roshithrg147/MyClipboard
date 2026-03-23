@@ -36,8 +36,15 @@ class ClipboardService:
     def clear_memory(self):
         logger.info("Clearing sensitive clipboard history from memory.")
         # Overwrite variables to ensure memory is securely cleared
-        for _ in range(len(self.history)):
+        for i in range(len(self.history)):
+            history_len = len(self.history[i])
+            self.history[i] = "*" * history_len
+        
+        while self.history:
             self.history.pop()
+            
+        if self._last_clip:
+            self._last_clip = "*" * len(self._last_clip)
         self._last_clip = None
 
     def _is_sensitive_or_invalid(self, text: str) -> bool:
