@@ -1,3 +1,11 @@
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#                                Author: RR                                     #
+#                                Software Architect                             #
+#                                Pilatewaveai                                   #
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+
+
 [Unit]
 Description=MyClipboard Enterprise Manager
 After=graphical-session.target

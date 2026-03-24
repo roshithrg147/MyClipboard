@@ -1,3 +1,10 @@
+<!--
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#                                Author: RR                                     #
+#                                Software Architect                             #
+#                                Pilatewaveai                                   #
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+-->
 # MyClipboard 📋
 
 A secure, lightweight, cross-platform clipboard history manager built with Python and Tkinter.

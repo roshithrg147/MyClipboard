@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/home/norwing/CodeBase/Projects/MyClipboard/app-home.py", line 8, in <module>
+    import pyperclip
+ModuleNotFoundError: No module named 'pyperclip'

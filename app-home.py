@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#                                Author: RR                                     #
+#                                Software Architect                             #
+#                                Pilatewaveai                                   #
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+
 import pyperclip
 import tkinter as tk
 from collections import deque
