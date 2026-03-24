@@ -22,7 +22,16 @@ An enterprise-grade, secure, lightweight, and cross-platform clipboard history m
 
 Ensure you have Python 3.8+ installed. 
 
-### 1. System Dependencies (Linux)
+### One-Line Install (Recommended)
+You can seamlessly install MyClipboard as a system application (including background daemon, desktop icon, and `myclipboard` terminal command) by running:
+```bash
+bash install.sh
+```
+
+### Manual Installation
+If you prefer to install manually:
+
+#### 1. System Dependencies (Linux)
 MyClipboard relies on native OS clipboards and Tkinter. On Debian/Ubuntu systems:
 ```bash
 sudo apt-get update
