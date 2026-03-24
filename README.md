@@ -5,59 +5,82 @@
 #                                Pilatewaveai                                   #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 -->
-# MyClipboard 📋
+# MyClipboard Enterprise 📋
 
-A secure, lightweight, cross-platform clipboard history manager built with Python and Tkinter.
+An enterprise-grade, secure, lightweight, and cross-platform clipboard history manager. Engineered for productivity and designed with strict security principles to ensure your sensitive data remains protected.
 
-## Features
-- **Secure by Design**: Clipboard history is stored strictly in-memory and is never written to disk, ensuring sensitive data (like passwords or API keys) doesn't leak.
-- **Unobtrusive UI**: Features a semi-transparent, always-on-top window that updates quietly without stealing your active window focus.
-- **Easy Retrieval**: Double-click any item in your history list to instantly copy it back to your active clipboard.
-- **Cross-Platform**: Built purely on Python's `tkinter` library, allowing it to work natively on Linux (X11/Wayland), macOS, and Windows.
+## 🚀 Key Features
 
-## Installation & Requirements
+- **Strict In-Memory Security**: Clipboard history is never written to disk. When memory is cleared, references are explicitly overwritten in RAM before garbage collection, mitigating memory-scraping attacks.
+- **System Tray Integration**: Runs silently in the background. The UI remains hidden until summoned, preserving screen real estate.
+- **Single-Instance Enforcement**: Utilizes IPC (Unix Sockets) to guarantee only one instance runs. Launching the application again seamlessly summons the existing background instance.
+- **Unobtrusive & Responsive UI**: Features a semi-transparent, always-on-top overlay that updates quietly without stealing active window focus.
+- **Instant Retrieval**: Double-click any item in your history queue to instantly restore it to your active clipboard.
+- **Daemon-Ready**: Includes native `systemd` integration for automated startup with your graphical session.
 
-Ensure you have Python 3 installed. You will also need the following dependencies:
+## 🛠️ Installation & Requirements
 
-1. **Pyperclip**: Used for interacting with the native OS clipboard.
+Ensure you have Python 3.8+ installed. 
+
+### 1. System Dependencies (Linux)
+MyClipboard relies on native OS clipboards and Tkinter. On Debian/Ubuntu systems:
+```bash
+sudo apt-get update
+sudo apt-get install python3-tk xclip # or xsel / wl-clipboard for Wayland
+```
+
+### 2. Python Dependencies
+Install the required packages using `pip`:
+```bash
+pip install -r pyproject.toml
+# Or install manually:
+pip install pyperclip pystray Pillow
+```
+
+## 💻 Usage
+
+Run the application module directly:
+```bash
+python3 -m app.main
+```
+The application will launch in the background. Look for the MyClipboard icon in your system tray to access your history or quit the application. Running the command a second time will bring the hidden window to the front.
+
+## ⚙️ Enterprise Integration
+
+### Background Service (Systemd)
+
+To run MyClipboard seamlessly as a background daemon on Linux:
+
+1. Copy the provided service file to your user systemd directory:
    ```bash
-   pip install pyperclip
+   mkdir -p ~/.config/systemd/user/
+   cp myclipboard.service ~/.config/systemd/user/
+   ```
+2. Update the `WorkingDirectory` and `ExecStart` paths in the copied `myclipboard.service` file to match your deployment path.
+3. Reload systemd and enable the service:
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now myclipboard.service
    ```
 
-2. **Tkinter** (Linux only): If you are on Ubuntu/Debian, Tkinter is not always installed by default.
-   ```bash
-   sudo apt-get install python3-tk
+### Desktop Integration
+
+To add MyClipboard to your application launcher:
+
+1. Create a file at `~/.local/share/applications/MyClipboard.desktop`:
+   ```ini
+   [Desktop Entry]
+   Version=1.0
+   Type=Application
+   Name=MyClipboard Enterprise
+   Comment=Secure Clipboard History Manager
+   Exec=python3 -m app.main
+   WorkingDirectory=/absolute/path/to/MyClipboard
+   Icon=edit-paste
+   Terminal=false
+   Categories=Utility;Security;
    ```
-
-## Usage
-
-Simply run the application using Python:
-```bash
-python3 app-home.py
-```
-
-## Linux Desktop Integration (Optional)
-
-You can comfortably install MyClipboard as a native desktop application on Linux environments by creating a `.desktop` shortcut.
-
-1. Create a file at `~/.local/share/applications/MyClipboard.desktop`.
-2. Add the following configuration (be sure to replace `/absolute/path/to/` with the actual path to your cloned repository):
-
-```ini
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=MyClipboard
-Comment=Secure Clipboard History Manager
-Exec=python3 /absolute/path/to/MyClipboard/app-home.py
-Icon=edit-paste
-Terminal=false
-Categories=Utility;
-```
-
-3. Update your desktop database:
-```bash
-update-desktop-database ~/.local/share/applications
-```
-
-You can now launch "MyClipboard" directly from your system Application Menu!
+2. Update your desktop database:
+   ```bash
+   update-desktop-database ~/.local/share/applications
+   ```
