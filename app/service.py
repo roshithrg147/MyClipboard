@@ -140,11 +140,20 @@ class ClipboardService:
             self.copy_to_clipboard(text)
 
     def _is_terminal_or_vault_active(self):
-        # Native Linux active window polling
+        # Native OS active window polling
         try:
-            output = subprocess.check_output(['xdotool', 'getactivewindow', 'getwindowname'], stderr=subprocess.DEVNULL)
-            window_name = output.decode('utf-8').lower()
-            if any(term in window_name for term in ['terminal', 'konsole', 'alacritty', 'kitty', 'ssh', 'vault', 'sudo', 'keepass', '1password']):
+            if os.uname().sysname == "Darwin":
+                # MacOS active window polling via AppleScript
+                cmd = ['osascript', '-e', 'tell application "System Events" to get name of first process whose frontmost is true']
+                output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+                window_name = output.decode('utf-8').strip().lower()
+            else:
+                # Linux active window polling via xdotool
+                output = subprocess.check_output(['xdotool', 'getactivewindow', 'getwindowname'], stderr=subprocess.DEVNULL)
+                window_name = output.decode('utf-8').lower()
+
+            sensitive_terms = ['terminal', 'iterm', 'warp', 'konsole', 'alacritty', 'kitty', 'ssh', 'vault', 'sudo', 'keepass', '1password', 'bitwarden']
+            if any(term in window_name for term in sensitive_terms):
                 return True
         except Exception: pass
         return False

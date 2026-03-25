@@ -31,10 +31,18 @@ SOCKET_PATH = "/tmp/myclipboard.sock"
 
 # Verify system dependencies
 def verify_environment():
-    if sys.platform.startswith("linux"):
+    system = sys.platform
+    if system.startswith("linux"):
         from shutil import which
         if not (which("xclip") or which("xsel") or which("wl-clipboard")):
             logger.critical("System dependency missing: xclip, xsel, or wl-clipboard is required on Linux.")
+            sys.exit(1)
+    elif system == "darwin":
+        # MacOS usually has pbcopy/pbpaste by default, but check for Python's Tcl/Tk for UI
+        try:
+            import tkinter
+        except ImportError:
+            logger.critical("Tkinter is missing. MacOS users should install it via: brew install python-tk")
             sys.exit(1)
 
 verify_environment()

@@ -7,89 +7,44 @@
 -->
 # MyClipboard Enterprise 📋
 
-An enterprise-grade, secure, lightweight, and cross-platform clipboard history manager. Engineered for productivity and designed with strict security principles to ensure your sensitive data remains protected.
+An enterprise-grade, secure, multi-threaded, and cross-platform clipboard manager.
 
 ## 🚀 Key Features
-
-- **Strict In-Memory Security**: Clipboard history is never written to disk. When memory is cleared, references are explicitly overwritten in RAM before garbage collection, mitigating memory-scraping attacks.
-- **System Tray Integration**: Runs silently in the background. The UI remains hidden until summoned, preserving screen real estate.
-- **Single-Instance Enforcement**: Utilizes IPC (Unix Sockets) to guarantee only one instance runs. Launching the application again seamlessly summons the existing background instance.
-- **Unobtrusive & Responsive UI**: Features a semi-transparent, always-on-top overlay that updates quietly without stealing active window focus.
-- **Instant Retrieval**: Double-click any item in your history queue to instantly restore it to your active clipboard.
-- **Daemon-Ready**: Includes native `systemd` integration for automated startup with your graphical session.
+- **Strict In-Memory Security**: Encrypted RAM history using `cryptography`. History is never written to disk.
+- **Terminal Awareness**: Automatically pauses recording when sensitive applications (Terminal, iTerm, SSH, Vault) are active.
+- **DLP Masking**: Masking for AWS keys, Credit Cards, SSH keys, etc., within the history UI.
+- **Multi-Paste Buffer**: Staged sequential paste via `Ctrl+Alt+V`.
+- **Global Hotkeys**: Summon the UI with `Ctrl+Shift+V` from anywhere.
+- **CLI Integration**: Use `mcb` to pipe terminal output directly into your clipboard history.
+- **Templates**: Instant access to your most-used text snippets.
 
 ## 🛠️ Installation & Requirements
 
-Ensure you have Python 3.8+ installed. 
-
 ### One-Line Install (Recommended)
-You can seamlessly install MyClipboard as a system application (including background daemon, desktop icon, and `myclipboard` terminal command) by running:
+Installs the background daemon, desktop shortcuts, and global commands:
 ```bash
 bash install.sh
 ```
 
-### Manual Installation
-If you prefer to install manually:
+### System Dependencies
+- **Linux**: `sudo apt install python3-tk xclip`
+- **macOS**: `brew install python-tk` (Requires Accessibility permissions for hotkeys)
 
-#### 1. System Dependencies (Linux)
-MyClipboard relies on native OS clipboards and Tkinter. On Debian/Ubuntu systems:
+### Python Setup (Manual)
 ```bash
-sudo apt-get update
-sudo apt-get install python3-tk xclip # or xsel / wl-clipboard for Wayland
-```
-
-### 2. Python Dependencies
-Install the required packages using `pip`:
-```bash
-pip install -r pyproject.toml
-# Or install manually:
-pip install pyperclip pystray Pillow
+pip install .
 ```
 
 ## 💻 Usage
-
-Run the application module directly:
-```bash
-python3 -m app.main
-```
-The application will launch in the background. Look for the MyClipboard icon in your system tray to access your history or quit the application. Running the command a second time will bring the hidden window to the front.
+- **Show History**: `Ctrl+Shift+V` or type `myclipboard`.
+- **Search**: Start typing once the UI appears.
+- **Pipe Output**: `echo "test" | mcb`
+- **Paste Next in Queue**: `Ctrl+Alt+V`
 
 ## ⚙️ Enterprise Integration
+- **Linux**: Managed via `systemd` (`--user` level).
+- **macOS**: Managed via `launchd` (`LaunchAgents`).
+- **Persistence**: Encrypted keys are ephemeral. On restart, history is cleared.
 
-### Background Service (Systemd)
-
-To run MyClipboard seamlessly as a background daemon on Linux:
-
-1. Copy the provided service file to your user systemd directory:
-   ```bash
-   mkdir -p ~/.config/systemd/user/
-   cp myclipboard.service ~/.config/systemd/user/
-   ```
-2. Update the `WorkingDirectory` and `ExecStart` paths in the copied `myclipboard.service` file to match your deployment path.
-3. Reload systemd and enable the service:
-   ```bash
-   systemctl --user daemon-reload
-   systemctl --user enable --now myclipboard.service
-   ```
-
-### Desktop Integration
-
-To add MyClipboard to your application launcher:
-
-1. Create a file at `~/.local/share/applications/MyClipboard.desktop`:
-   ```ini
-   [Desktop Entry]
-   Version=1.0
-   Type=Application
-   Name=MyClipboard Enterprise
-   Comment=Secure Clipboard History Manager
-   Exec=python3 -m app.main
-   WorkingDirectory=/absolute/path/to/MyClipboard
-   Icon=edit-paste
-   Terminal=false
-   Categories=Utility;Security;
-   ```
-2. Update your desktop database:
-   ```bash
-   update-desktop-database ~/.local/share/applications
-   ```
+---
+© 2026 RR, Pilatewaveai. All Rights Reserved.
