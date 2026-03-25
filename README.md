@@ -28,7 +28,8 @@ bash install.sh
 
 ### System Dependencies
 - **Linux**: `sudo apt install python3-tk xclip`
-- **macOS**: `brew install python-tk` (Requires Accessibility permissions for hotkeys)
+- **macOS**: `brew install python-tk`
+  - **Permissions**: After installation, you must grant **Accessibility** permissions to your Terminal (or the Python binary) in `System Settings > Privacy & Security > Accessibility` for global hotkeys to function.
 
 ### Python Setup (Manual)
 ```bash
@@ -36,10 +37,14 @@ pip install .
 ```
 
 ## 💻 Usage
-- **Show History**: `Ctrl+Shift+V` or type `myclipboard`.
+- **Show History**: 
+  - **macOS**: `Cmd + Shift + V`
+  - **Linux**: `Ctrl + Shift + V`
 - **Search**: Start typing once the UI appears.
 - **Pipe Output**: `echo "test" | mcb`
-- **Paste Next in Queue**: `Ctrl+Alt+V`
+- **Paste Next in Queue**: 
+  - **macOS**: `Cmd + Alt + V`
+  - **Linux**: `Ctrl + Alt + V`
 
 ## ⚙️ Enterprise Integration
 - **Linux**: Managed via `systemd` (`--user` level).
