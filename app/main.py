@@ -140,11 +140,20 @@ class ClipboardConsumerApp:
             
         def on_activate_multi_paste():
             self.service.pop_multi_paste()
+
+        # OS-specific key mapping
+        if sys.platform == "darwin":
+            hotkeys = {
+                '<cmd>+<shift>+v': on_activate_h,
+                '<cmd>+<alt>+v': on_activate_multi_paste
+            }
+        else:
+            hotkeys = {
+                '<ctrl>+<shift>+v': on_activate_h,
+                '<ctrl>+<alt>+v': on_activate_multi_paste
+            }
             
-        self.hotkey_listener = keyboard.GlobalHotKeys({
-            '<ctrl>+<shift>+v': on_activate_h,
-            '<ctrl>+<alt>+v': on_activate_multi_paste
-        })
+        self.hotkey_listener = keyboard.GlobalHotKeys(hotkeys)
         self.hotkey_listener.start()
 
     def _on_search_change(self, *args):
