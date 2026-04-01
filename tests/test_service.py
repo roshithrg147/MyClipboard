@@ -34,12 +34,43 @@ def test_history_deque_limit_and_rotation(service):
     assert plaintext == "test4"
 
 def test_clear_memory(service):
+    service.ai_enabled = True
     service.add_external_clip("secret_cookie_token")
+    service.ai_insights["dummy_hash"] = b"encrypted_insight"
     assert len(service.history) > 0
     assert service._last_clip_hash is not None
+    assert len(service.ai_insights) == 1
     
     service.clear_memory()
     
     assert len(service.history) == 0
     assert service._last_clip_hash is None
     assert service._cipher is None # Memory wiped
+    assert len(service.ai_insights) == 0
+
+def test_threading_lock(service):
+    # This just ensures the lock is present and can be acquired
+    assert hasattr(service, 'lock')
+    with service.lock:
+        service.history.append(b"locked_item")
+    assert len(service.history) == 1
+
+def test_transform_json(service):
+    service.add_external_clip('{"key": "value"}')
+    # service.history[0] is the encrypted item
+    service.transform_item(0, "json")
+    # New item (transformed) is at index 0, old one at 1
+    with service.lock:
+        plaintext = service._cipher.decrypt(service.history[0]).decode('utf-8')
+        assert '"key": "value"' in plaintext
+        assert "    " in plaintext # Indentation from json.dumps
+
+def test_multi_paste(service):
+    service.add_external_clip("item1")
+    service.add_external_clip("item2")
+    service.queue_multi_paste([0, 1])
+    assert len(service.multi_paste_buffer) == 2
+    
+    service.pop_multi_paste()
+    # Note: pyperclip might not work in headless tests, but we're testing the buffer logic
+    assert len(service.multi_paste_buffer) == 1

@@ -15,6 +15,7 @@ import re
 import subprocess
 from collections import deque
 import pyperclip
+from app.sync import SyncService
 
 try:
     from cryptography.fernet import Fernet
@@ -22,7 +23,61 @@ except ImportError:
     logging.error("cryptography package is missing. Install with: pip install cryptography")
     raise
 
+try:
+    import keyring
+except ImportError:
+    logging.warning("keyring package is missing. Install with: pip install keyring")
+    keyring = None
+
+try:
+    import google.generativeai as genai
+except ImportError:
+    logging.warning("google.generativeai package is missing. Install with: pip install google-generativeai")
+    genai = None
+
 logger = logging.getLogger(__name__)
+
+class AIService:
+    def __init__(self):
+        pass
+
+    def generate_summary(self, text: str) -> str:
+        if not keyring or not genai:
+            return "Error: Missing 'google-generativeai' or 'keyring' module. Install with pip."
+        api_key = keyring.get_password("myclipboard", "gemini_api_key")
+        if not api_key:
+            return "Error: API Key not configured."
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            prompt = f"Analyze the copied text and provide a very brief, useful insight, summary, or extracted data. Be concise.\n\nCopied Text:\n{text}"
+            response = model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            return f"AI Error: {str(e)}"
+
+    def transform_code(self, text: str, transform_type: str) -> str:
+        if not keyring or not genai:
+            return "Error: Missing AI modules."
+        api_key = keyring.get_password("myclipboard", "gemini_api_key")
+        if not api_key:
+            return "Error: API Key not configured."
+        
+        prompts = {
+            "refactor_pythonic": "Refactor the following code to be more 'Pythonic' and idiomatic Python. Return only the refactored code.\n\n",
+            "refactor_rust": "Convert the following code logic to Rust. Return only the Rust code.\n\n",
+            "refactor_bug": "Identify and fix potential bugs in the following code. Return only the fixed code.\n\n",
+            "logic_check_rust": "Perform a logic check on the following Python code and explain how to implement it correctly in Rust to avoid common pitfalls (like memory safety). Return a brief analysis and Rust snippet.\n\n"
+        }
+        
+        prompt_prefix = prompts.get(transform_type, "Refactor the following code:\n\n")
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(f"{prompt_prefix}{text}")
+            return response.text.strip()
+        except Exception as e:
+            return f"AI Transformation Error: {str(e)}"
 
 class ClipboardService:
     def __init__(self, update_queue: queue.Queue, history_limit: int = 10, max_clip_size: int = 1024 * 1024):
@@ -30,6 +85,7 @@ class ClipboardService:
         self.history_limit = history_limit
         self.max_clip_size = max_clip_size
         self.history = deque(maxlen=history_limit)
+        self.lock = threading.Lock()
         
         self._key = Fernet.generate_key()
         self._cipher = Fernet(self._key)
@@ -48,6 +104,16 @@ class ClipboardService:
         self._last_clip_hash = None
         self.is_paused = False
         self.templates = []
+        
+        # AI Features
+        self.ai_enabled = False
+        self.ai_insights = {}
+        self.ai_queue = queue.Queue()
+        self.ai_service = AIService()
+        self._ai_thread = None
+        
+        # E2EE Sync Service
+        self.sync_service = SyncService(update_queue=self.update_queue)
         
         self._load_templates()
 
@@ -88,10 +154,34 @@ class ClipboardService:
         self._running = True
         self._thread = threading.Thread(target=self._observe_clipboard, daemon=True)
         self._thread.start()
+        
+        self._ai_thread = threading.Thread(target=self._process_ai_insights, daemon=True)
+        self._ai_thread.start()
+
+        if self.sync_service.enabled:
+            self.sync_service.start()
+
+    def _process_ai_insights(self):
+        while self._running:
+            try:
+                clip_hash, text = self.ai_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+                
+            if not self.ai_enabled or self.is_paused:
+                continue
+                
+            insight = self.ai_service.generate_summary(text)
+            if self._cipher:
+                encrypted_insight = self._cipher.encrypt(insight.encode('utf-8'))
+                self.ai_insights[clip_hash] = encrypted_insight
+                self._push_update_to_ui()
 
     def stop(self):
         self._running = False
-        if self._thread: self._thread.join(timeout=2.0)
+        if self._thread and self._thread.is_alive(): self._thread.join(timeout=0.1)
+        if self._ai_thread and self._ai_thread.is_alive(): self._ai_thread.join(timeout=0.1)
+        self.sync_service.stop()
         self.clear_memory()
 
     def clear_memory(self):
@@ -99,6 +189,12 @@ class ClipboardService:
         self._cipher = None
         while self.history: self.history.pop()
         self._last_clip_hash = None
+        
+        if hasattr(self, 'ai_insights'):
+            self.ai_insights.clear()
+            while not self.ai_queue.empty():
+                try: self.ai_queue.get_nowait()
+                except queue.Empty: break
 
     def _get_hash(self, text: str) -> str:
         return hashlib.sha256(text.encode('utf-8', errors='ignore')).hexdigest() if text else None
@@ -118,16 +214,21 @@ class ClipboardService:
 
     def _push_update_to_ui(self):
         display_list = []
-        for encrypted_item in self.history:
-            try:
-                plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
-                display_text = self._mask_sensitive_data(plaintext.replace('\n', ' '))
-                if len(display_text) > 80: display_text = display_text[:77] + "..."
-                display_list.append(display_text)
-                del plaintext
-            except Exception:
-                display_list.append("[Encrypted Data]")
-        self.update_queue.put({"type": "new_clip", "data": display_list})
+        with self.lock:
+            for encrypted_item in self.history:
+                try:
+                    plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
+                    item_hash = self._get_hash(plaintext)
+                    display_text = self._mask_sensitive_data(plaintext.replace('\n', ' '))
+                    if len(display_text) > 80: display_text = display_text[:77] + "..."
+                    if hasattr(self, 'ai_insights') and item_hash in self.ai_insights:
+                        display_text += " [✨ AI]"
+                    display_list.append(display_text)
+                except Exception as e:
+                    logger.error(f"Error decrypting item for UI: {e}")
+                    display_list.append("[Encrypted Data]")
+        if self.update_queue:
+            self.update_queue.put({"type": "new_clip", "data": display_list})
 
     def add_external_clip(self, text: str):
         if not text or len(text.encode('utf-8', errors='ignore')) > self.max_clip_size: return
@@ -135,7 +236,15 @@ class ClipboardService:
             current_hash = self._get_hash(text)
             if self._last_clip_hash == current_hash: return
             encrypted_clip = self._cipher.encrypt(text.encode('utf-8'))
-            self.history.appendleft(encrypted_clip)
+            with self.lock:
+                self.history.appendleft(encrypted_clip)
+            if self.ai_enabled:
+                self.ai_queue.put((current_hash, text))
+            
+            # E2EE Sync Push
+            if self.sync_service.enabled:
+                self.sync_service.push(text)
+
             self._push_update_to_ui()
             self.copy_to_clipboard(text)
 
@@ -174,26 +283,38 @@ class ClipboardService:
                         continue
                     if not self._is_sensitive_or_invalid(current_clip):
                         encrypted_clip = self._cipher.encrypt(current_clip.encode('utf-8'))
-                        self.history.appendleft(encrypted_clip)
+                        with self.lock:
+                            self.history.appendleft(encrypted_clip)
+                        if self.ai_enabled:
+                            self.ai_queue.put((current_hash, current_clip))
+                        
+                        # E2EE Sync Push
+                        if self.sync_service.enabled:
+                            self.sync_service.push(current_clip)
+
                         self._push_update_to_ui()
                     self._last_clip_hash = current_hash
-            except Exception: pass
+            except Exception as e:
+                logger.error(f"Clipboard observer error: {e}")
             time.sleep(0.5)
 
     def restore_from_index(self, index: int):
-        if 0 <= index < len(self.history):
-            try:
-                encrypted_item = self.history[index]
-                plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
-                self.copy_to_clipboard(plaintext)
-                del plaintext
-            except Exception: pass
+        with self.lock:
+            if 0 <= index < len(self.history):
+                try:
+                    encrypted_item = self.history[index]
+                    plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
+                    self.copy_to_clipboard(plaintext)
+                    del plaintext
+                except Exception as e:
+                    logger.error(f"Error restoring from index {index}: {e}")
 
     def queue_multi_paste(self, indices: list):
-        self.multi_paste_buffer.clear()
-        for idx in indices:
-            if 0 <= idx < len(self.history):
-                self.multi_paste_buffer.append(self.history[idx])
+        with self.lock:
+            self.multi_paste_buffer.clear()
+            for idx in indices:
+                if 0 <= idx < len(self.history):
+                    self.multi_paste_buffer.append(self.history[idx])
 
     def pop_multi_paste(self):
         if self.multi_paste_buffer:
@@ -202,38 +323,46 @@ class ClipboardService:
                 plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
                 self.copy_to_clipboard(plaintext)
                 del plaintext
-            except Exception: pass
+            except Exception as e:
+                logger.error(f"Error popping multi-paste: {e}")
 
     def transform_item(self, index: int, transform_type: str):
-        if 0 <= index < len(self.history):
-            try:
-                encrypted_item = self.history[index]
-                plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
-                transformed_text = plaintext
-                
-                if transform_type == "json":
-                    try:
-                        parsed = json.loads(plaintext)
-                        transformed_text = json.dumps(parsed, indent=4)
-                    except json.JSONDecodeError: del plaintext; return
-                elif transform_type == "camel":
-                    parts = plaintext.replace('_', ' ').replace('-', ' ').split()
-                    if parts: transformed_text = parts[0].lower() + ''.join(word.capitalize() for word in parts[1:])
-                elif transform_type == "snake":
-                    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', plaintext)
-                    transformed_text = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-                    transformed_text = transformed_text.replace('-', '_').replace(' ', '_')
-                elif transform_type == "base64":
-                    import base64
-                    transformed_text = base64.b64encode(plaintext.encode('utf-8')).decode('utf-8')
-                elif transform_type == "base64_decode":
-                    import base64
-                    try: transformed_text = base64.b64decode(plaintext.strip()).decode('utf-8')
-                    except Exception: del plaintext; return
+        with self.lock:
+            if 0 <= index < len(self.history):
+                try:
+                    encrypted_item = self.history[index]
+                    plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
+                    transformed_text = plaintext
+                    
+                    if transform_type == "json":
+                        try:
+                            parsed = json.loads(plaintext)
+                            transformed_text = json.dumps(parsed, indent=4)
+                        except json.JSONDecodeError: return
+                    elif transform_type == "camel":
+                        parts = plaintext.replace('_', ' ').replace('-', ' ').split()
+                        if parts: transformed_text = parts[0].lower() + ''.join(word.capitalize() for word in parts[1:])
+                    elif transform_type == "snake":
+                        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', plaintext)
+                        transformed_text = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+                        transformed_text = transformed_text.replace('-', '_').replace(' ', '_')
+                    elif transform_type == "base64":
+                        import base64
+                        transformed_text = base64.b64encode(plaintext.encode('utf-8')).decode('utf-8')
+                    elif transform_type == "base64_decode":
+                        import base64
+                        try: transformed_text = base64.b64decode(plaintext.strip()).decode('utf-8')
+                        except Exception: return
+                    elif transform_type.startswith("refactor_") or transform_type == "logic_check_rust":
+                        transformed_text = self.ai_service.transform_code(plaintext, transform_type)
 
-                self.add_external_clip(transformed_text)
-                del plaintext; del transformed_text
-            except Exception: pass
+                    # Unlock before calling add_external_clip because it acquires the lock too
+                    pass 
+                except Exception as e:
+                    logger.error(f"Error transforming item at index {index}: {e}")
+                    return
+
+        self.add_external_clip(transformed_text)
 
     def copy_to_clipboard(self, text: str):
         try:

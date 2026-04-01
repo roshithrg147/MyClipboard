@@ -1,0 +1,16 @@
+cryptography
+pynput
+pyperclip
+pillow
+pystray
+google-generativeai
+keyring
+requests
+pydantic
+pytest
+SecretStorage
+google-auth
+google-auth-httplib2
+google-api-core
+google-api-python-client
+google-ai-generativelanguage
