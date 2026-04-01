@@ -90,6 +90,13 @@ def test_entropy_sensitive_detection():
     # High entropy strings (simulated keys) should be sensitive
     assert service._is_sensitive_or_invalid("4f8a2b9c1d0e3f5g7h9i2j4k6l8m0n2o")
     assert service._is_sensitive_or_invalid("zK9!pL2#mN5*qR8@tV1&xY4^")
+    
+    # Audit: common password formats often have medium-high entropy
+    # Check false negative: password1234
+    assert not service._is_sensitive_or_invalid("password1234") # Low entropy, shouldn't be blocked.
+    
+    # Check false positive: a long random sentence
+    assert not service._is_sensitive_or_invalid("This is a long sentence with many words that should have low entropy.")
 
 def test_memory_leakage_clear_memory():
     """
@@ -134,15 +141,15 @@ def test_wayland_detection_mock():
     service = ClipboardService(update_queue=update_queue)
 
     # Test MacOS path
-    with patch('os.uname') as mock_uname:
-        mock_uname.return_value.sysname = "Darwin"
+    with patch('platform.system') as mock_platform:
+        mock_platform.return_value = "Darwin"
         with patch('subprocess.check_output') as mock_cmd:
             mock_cmd.return_value = b"Terminal"
             assert service._is_terminal_or_vault_active() is True
 
     # Test Linux path - GNOME Wayland (gdbus)
-    with patch('os.uname') as mock_uname:
-        mock_uname.return_value.sysname = "Linux"
+    with patch('platform.system') as mock_platform:
+        mock_platform.return_value = "Linux"
         # Simulate gdbus success
         def mock_run(cmd, **kwargs):
             if cmd[0] == 'gdbus':
@@ -153,14 +160,21 @@ def test_wayland_detection_mock():
             assert service._is_terminal_or_vault_active() is True
 
     # Test Linux path - Fallback to xdotool
-    with patch('os.uname') as mock_uname:
-        mock_uname.return_value.sysname = "Linux"
+    with patch('platform.system') as mock_platform:
+        mock_platform.return_value = "Linux"
         def mock_run_fallback(cmd, **kwargs):
             if cmd[0] == 'xdotool':
                 return b"gnome-terminal"
             raise subprocess.CalledProcessError(1, cmd)
             
         with patch('subprocess.check_output', side_effect=mock_run_fallback):
+            assert service._is_terminal_or_vault_active() is True
+
+    # Test Windows path - Mock pygetwindow
+    with patch('platform.system') as mock_platform:
+        mock_platform.return_value = "Windows"
+        with patch('pygetwindow.getActiveWindow') as mock_gw:
+            mock_gw.return_value.title = "PowerShell"
             assert service._is_terminal_or_vault_active() is True
 
 if __name__ == "__main__":

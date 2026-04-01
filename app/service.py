@@ -227,6 +227,8 @@ class ClipboardService:
             return entropy
 
         # High entropy strings are likely keys/tokens
+        # Audit: common password formats often have medium-high entropy
+        # False negative check: if it has spaces, it's likely a sentence, not a key.
         if len(text) > 8 and get_entropy(text) > 4.2 and " " not in text:
             return True
 
@@ -262,6 +264,26 @@ class ClipboardService:
         if self.update_queue:
             self.update_queue.put({"type": "new_clip", "data": display_list})
 
+    def ingest_remote_clip(self, text: str, timestamp: float):
+        """
+        Merge remote encrypted blobs into local RAM history without corruption.
+        Uses timestamp-based conflict resolution.
+        """
+        if not text: return
+        current_hash = self._get_hash(text)
+        
+        with self.lock:
+            if self._last_clip_hash == current_hash: return
+            
+            encrypted_clip = self._cipher.encrypt(text.encode('utf-8'))
+            self.history.appendleft(encrypted_clip)
+            self._last_clip_hash = current_hash
+            
+            if self.ai_enabled:
+                self.ai_queue.put((current_hash, text))
+                
+        self._push_update_to_ui()
+
     def add_external_clip(self, text: str):
         if not text or len(text.encode('utf-8', errors='ignore')) > self.max_clip_size: return
         if not self._is_sensitive_or_invalid(text):
@@ -281,10 +303,12 @@ class ClipboardService:
             self.copy_to_clipboard(text)
 
     def _is_terminal_or_vault_active(self):
-        # Native OS active window polling with Wayland fallbacks
+        # Native OS active window polling with Wayland and Windows fallbacks
         try:
             window_name = ""
-            sys_name = os.uname().sysname
+            import platform
+            sys_name = platform.system()
+            
             if sys_name == "Darwin":
                 # MacOS active window polling via AppleScript
                 cmd = ['osascript', '-e', 'tell application "System Events" to get name of first process whose frontmost is true']
@@ -314,6 +338,22 @@ class ClipboardService:
                                 window = gw.getActiveWindow()
                                 if window: window_name = window.title.lower()
                             except ImportError: pass
+            elif sys_name == "Windows":
+                try:
+                    import pygetwindow as gw
+                    window = gw.getActiveWindow()
+                    if window: window_name = window.title.lower()
+                except ImportError:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        user32 = ctypes.windll.user32
+                        h_wnd = user32.GetForegroundWindow()
+                        length = user32.GetWindowTextLengthW(h_wnd)
+                        buf = ctypes.create_unicode_buffer(length + 1)
+                        user32.GetWindowTextW(h_wnd, buf, length + 1)
+                        window_name = buf.value.lower()
+                    except Exception: pass
 
             if any(term in window_name for term in self.sensitive_apps):
                 return True

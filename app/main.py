@@ -243,6 +243,9 @@ class ClipboardConsumerApp:
         self.sync_status_label = tk.Label(self.sync_frame, text="STATUS: Disconnected", font=THEME["font_bold"], bg=THEME["bg"], fg=THEME["status_err"])
         self.sync_status_label.pack(anchor=tk.W, padx=10, pady=10)
 
+        self.last_synced_label = tk.Label(self.sync_frame, text="LAST SYNCED: Never", font=THEME["font"], bg=THEME["bg"], fg=THEME["fg"])
+        self.last_synced_label.pack(anchor=tk.W, padx=10, pady=(0, 10))
+
         self.save_sync_btn = ttk.Button(self.sync_frame, text="APPLY SYNC CONFIG", command=self._on_sync_config_change, style="TButton")
         self.save_sync_btn.pack(anchor=tk.W, padx=10, pady=5)
 
@@ -417,7 +420,20 @@ class ClipboardConsumerApp:
                 if msg["type"] == "new_clip":
                     self.history = msg["data"]
                     self.root.event_generate("<<NewClip>>")
+                elif msg["type"] == "remote_sync":
+                    self.service.ingest_remote_clip(msg["data"], msg["timestamp"])
+                    from datetime import datetime
+                    dt_object = datetime.fromtimestamp(msg["timestamp"])
+                    self.last_synced_label.config(text=f"LAST SYNCED: {dt_object.strftime('%Y-%m-%d %H:%M:%S')}")
+                elif msg["type"] == "sync_conflict":
+                    import tkinter.messagebox
+                    tkinter.messagebox.showinfo("Sync Conflict", "A remote update arrived but was superseded by a newer local copy.")
         except queue.Empty: pass
+        
+        # Update sync status periodically
+        status = self.service.sync_service.get_status()
+        self.sync_status_label.config(text=f"STATUS: {status}", fg=THEME["status_ok"] if status == "Connected" else THEME["status_err"])
+        
         self.root.after(200, self._check_for_updates)
 
     def _render_listbox(self):
