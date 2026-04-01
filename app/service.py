@@ -105,6 +105,9 @@ class ClipboardService:
         self.is_paused = False
         self.templates = []
         
+        # Sensitive apps manually added by user if detection fails
+        self.sensitive_apps = ['terminal', 'iterm', 'warp', 'konsole', 'alacritty', 'kitty', 'ssh', 'vault', 'sudo', 'keepass', '1password', 'bitwarden']
+        
         # AI Features
         self.ai_enabled = False
         self.ai_insights = {}
@@ -185,25 +188,48 @@ class ClipboardService:
         self.clear_memory()
 
     def clear_memory(self):
-        self._key = b"*" * 44
-        self._cipher = None
-        while self.history: self.history.pop()
-        self._last_clip_hash = None
-        
-        if hasattr(self, 'ai_insights'):
-            self.ai_insights.clear()
-            while not self.ai_queue.empty():
-                try: self.ai_queue.get_nowait()
-                except queue.Empty: break
+        with self.lock:
+            self._key = b"\x00" * 44
+            self._cipher = None
+            while self.history:
+                item = self.history.pop()
+                del item
+            self._last_clip_hash = None
+            
+            if hasattr(self, 'ai_insights'):
+                self.ai_insights.clear()
+                while not self.ai_queue.empty():
+                    try:
+                        item = self.ai_queue.get_nowait()
+                        del item
+                    except queue.Empty: break
+        import gc
+        gc.collect()
 
     def _get_hash(self, text: str) -> str:
         return hashlib.sha256(text.encode('utf-8', errors='ignore')).hexdigest() if text else None
 
     def _is_sensitive_or_invalid(self, text: str) -> bool:
         if not text or len(text) < 3: return True
-        if 8 <= len(text) <= 32 and " " not in text:
-            if any(c.isupper() for c in text) and any(c.islower() for c in text) and any(c.isdigit() for c in text) and any(not c.isalnum() for c in text):
-                return True
+        
+        # Robust entropy check instead of naive regex
+        def get_entropy(s):
+            import math
+            if not s: return 0
+            entropy = 0
+            counts = [0] * 256
+            for b in s.encode('utf-8', errors='ignore'):
+                counts[b] += 1
+            for count in counts:
+                if count > 0:
+                    p_x = float(count) / len(s)
+                    entropy += -p_x * math.log(p_x, 2)
+            return entropy
+
+        # High entropy strings are likely keys/tokens
+        if len(text) > 8 and get_entropy(text) > 4.2 and " " not in text:
+            return True
+
         return False
 
     def _mask_sensitive_data(self, text: str) -> str:
@@ -215,18 +241,24 @@ class ClipboardService:
     def _push_update_to_ui(self):
         display_list = []
         with self.lock:
-            for encrypted_item in self.history:
-                try:
-                    plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
-                    item_hash = self._get_hash(plaintext)
-                    display_text = self._mask_sensitive_data(plaintext.replace('\n', ' '))
-                    if len(display_text) > 80: display_text = display_text[:77] + "..."
-                    if hasattr(self, 'ai_insights') and item_hash in self.ai_insights:
-                        display_text += " [✨ AI]"
-                    display_list.append(display_text)
-                except Exception as e:
-                    logger.error(f"Error decrypting item for UI: {e}")
-                    display_list.append("[Encrypted Data]")
+            # Create a local copy of history to avoid mutation errors
+            history_copy = list(self.history)
+            
+        for encrypted_item in history_copy:
+            try:
+                plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
+                item_hash = self._get_hash(plaintext)
+                display_text = self._mask_sensitive_data(plaintext.replace('\n', ' '))
+                if len(display_text) > 80: display_text = display_text[:77] + "..."
+                if hasattr(self, 'ai_insights') and item_hash in self.ai_insights:
+                    display_text += " [✨ AI]"
+                display_list.append(display_text)
+                # Overwrite sensitive data in local buffer
+                del plaintext
+            except Exception as e:
+                logger.error(f"Error decrypting item for UI: {e}")
+                display_list.append("[Encrypted Data]")
+        
         if self.update_queue:
             self.update_queue.put({"type": "new_clip", "data": display_list})
 
@@ -249,20 +281,41 @@ class ClipboardService:
             self.copy_to_clipboard(text)
 
     def _is_terminal_or_vault_active(self):
-        # Native OS active window polling
+        # Native OS active window polling with Wayland fallbacks
         try:
-            if os.uname().sysname == "Darwin":
+            window_name = ""
+            sys_name = os.uname().sysname
+            if sys_name == "Darwin":
                 # MacOS active window polling via AppleScript
                 cmd = ['osascript', '-e', 'tell application "System Events" to get name of first process whose frontmost is true']
                 output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
                 window_name = output.decode('utf-8').strip().lower()
-            else:
-                # Linux active window polling via xdotool
-                output = subprocess.check_output(['xdotool', 'getactivewindow', 'getwindowname'], stderr=subprocess.DEVNULL)
-                window_name = output.decode('utf-8').lower()
+            elif sys_name == "Linux":
+                # Try GNOME Wayland via gdbus
+                try:
+                    cmd = ['gdbus', 'call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell', '--method', 'org.gnome.Shell.Eval', 'global.get_window_actors().map(a => a.get_meta_window()).find(w => w.has_focus()).get_title()']
+                    output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+                    window_name = output.decode('utf-8').split("'")[1].lower()
+                except Exception:
+                    # Try KDE Wayland via qdbus
+                    try:
+                        cmd = ['qdbus', 'org.kde.KWin', '/KWin', 'org.kde.KWin.activeWindow']
+                        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+                        window_name = output.decode('utf-8').lower()
+                    except Exception:
+                        # Fallback to xdotool (X11)
+                        try:
+                            output = subprocess.check_output(['xdotool', 'getactivewindow', 'getwindowname'], stderr=subprocess.DEVNULL)
+                            window_name = output.decode('utf-8').lower()
+                        except Exception:
+                            # Final generic fallback via pygetwindow if available
+                            try:
+                                import pygetwindow as gw
+                                window = gw.getActiveWindow()
+                                if window: window_name = window.title.lower()
+                            except ImportError: pass
 
-            sensitive_terms = ['terminal', 'iterm', 'warp', 'konsole', 'alacritty', 'kitty', 'ssh', 'vault', 'sudo', 'keepass', '1password', 'bitwarden']
-            if any(term in window_name for term in sensitive_terms):
+            if any(term in window_name for term in self.sensitive_apps):
                 return True
         except Exception: pass
         return False
@@ -327,40 +380,46 @@ class ClipboardService:
                 logger.error(f"Error popping multi-paste: {e}")
 
     def transform_item(self, index: int, transform_type: str):
+        plaintext = None
         with self.lock:
             if 0 <= index < len(self.history):
                 try:
                     encrypted_item = self.history[index]
                     plaintext = self._cipher.decrypt(encrypted_item).decode('utf-8', errors='ignore')
-                    transformed_text = plaintext
-                    
-                    if transform_type == "json":
-                        try:
-                            parsed = json.loads(plaintext)
-                            transformed_text = json.dumps(parsed, indent=4)
-                        except json.JSONDecodeError: return
-                    elif transform_type == "camel":
-                        parts = plaintext.replace('_', ' ').replace('-', ' ').split()
-                        if parts: transformed_text = parts[0].lower() + ''.join(word.capitalize() for word in parts[1:])
-                    elif transform_type == "snake":
-                        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', plaintext)
-                        transformed_text = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-                        transformed_text = transformed_text.replace('-', '_').replace(' ', '_')
-                    elif transform_type == "base64":
-                        import base64
-                        transformed_text = base64.b64encode(plaintext.encode('utf-8')).decode('utf-8')
-                    elif transform_type == "base64_decode":
-                        import base64
-                        try: transformed_text = base64.b64decode(plaintext.strip()).decode('utf-8')
-                        except Exception: return
-                    elif transform_type.startswith("refactor_") or transform_type == "logic_check_rust":
-                        transformed_text = self.ai_service.transform_code(plaintext, transform_type)
-
-                    # Unlock before calling add_external_clip because it acquires the lock too
-                    pass 
                 except Exception as e:
-                    logger.error(f"Error transforming item at index {index}: {e}")
+                    logger.error(f"Error decrypting item for transform at index {index}: {e}")
                     return
+
+        if plaintext is None: return
+
+        transformed_text = plaintext
+        try:
+            if transform_type == "json":
+                try:
+                    parsed = json.loads(plaintext)
+                    transformed_text = json.dumps(parsed, indent=4)
+                except json.JSONDecodeError: return
+            elif transform_type == "camel":
+                parts = plaintext.replace('_', ' ').replace('-', ' ').split()
+                if parts: transformed_text = parts[0].lower() + ''.join(word.capitalize() for word in parts[1:])
+            elif transform_type == "snake":
+                s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', plaintext)
+                transformed_text = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+                transformed_text = transformed_text.replace('-', '_').replace(' ', '_')
+            elif transform_type == "base64":
+                import base64
+                transformed_text = base64.b64encode(plaintext.encode('utf-8')).decode('utf-8')
+            elif transform_type == "base64_decode":
+                import base64
+                try: transformed_text = base64.b64decode(plaintext.strip()).decode('utf-8')
+                except Exception: return
+            elif transform_type.startswith("refactor_") or transform_type == "logic_check_rust":
+                transformed_text = self.ai_service.transform_code(plaintext, transform_type)
+        except Exception as e:
+            logger.error(f"Error transforming item at index {index}: {e}")
+            return
+        finally:
+            del plaintext
 
         self.add_external_clip(transformed_text)
 

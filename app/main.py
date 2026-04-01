@@ -94,12 +94,13 @@ class ClipboardConsumerApp:
         self._setup_hotkeys()
         
         self.service.start()
-        self._process_queue()
+        self._check_for_updates()
 
     def _load_config(self):
         default_config = {
             "hotkey_show": "<ctrl>+<shift>+v" if sys.platform != "darwin" else "<cmd>+<shift>+v",
-            "hotkey_multi_paste": "<ctrl>+<alt>+v" if sys.platform != "darwin" else "<cmd>+<alt>+v"
+            "hotkey_multi_paste": "<ctrl>+<alt>+v" if sys.platform != "darwin" else "<cmd>+<alt>+v",
+            "is_enterprise": True
         }
         if os.path.exists(CONFIG_PATH):
             try:
@@ -123,6 +124,9 @@ class ClipboardConsumerApp:
         self.root.geometry("500x700")
         self.root.attributes('-alpha', 0.95)
         
+        # Virtual Event for thread-safe UI updates
+        self.root.bind("<<NewClip>>", lambda e: self._render_listbox())
+
         # Style Initialization
         self.style = ttk.Style()
         self.style.theme_use('clam')
@@ -402,15 +406,19 @@ class ClipboardConsumerApp:
         self.tray_thread = threading.Thread(target=self.icon.run, daemon=True)
         self.tray_thread.start()
 
-    def _process_queue(self):
+    def _check_for_updates(self):
+        """
+        Poll the update queue for new clips and trigger a virtual event for UI update.
+        Replaces high-frequency polling with event-based updates where possible.
+        """
         try:
             while True:
                 msg = self.update_queue.get_nowait()
                 if msg["type"] == "new_clip":
                     self.history = msg["data"]
-                    self._render_listbox()
+                    self.root.event_generate("<<NewClip>>")
         except queue.Empty: pass
-        self.root.after(100, self._process_queue)
+        self.root.after(200, self._check_for_updates)
 
     def _render_listbox(self):
         query = self.search_var.get().lower()

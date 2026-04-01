@@ -11,6 +11,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger(__name__)
 
+CONFIG_PATH = os.path.expanduser("~/.config/myclipboard/config.json")
+
 class SyncService:
     def __init__(self, update_queue):
         self.update_queue = update_queue
@@ -24,12 +26,39 @@ class SyncService:
         self._sync_thread = None
         self.status = "Disconnected"
 
+    def _get_or_create_salt(self):
+        """
+        Retrieve or generate a unique per-user salt stored in config.json.
+        """
+        salt = None
+        config = {}
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, "r") as f:
+                    config = json.load(f)
+                    salt_hex = config.get("sync_salt")
+                    if salt_hex:
+                        salt = base64.b16decode(salt_hex.upper().encode())
+            except Exception as e:
+                logger.error(f"Failed to read salt from config: {e}")
+
+        if not salt:
+            salt = os.urandom(16)
+            config["sync_salt"] = base64.b16encode(salt).decode().lower()
+            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+            try:
+                with open(CONFIG_PATH, "w") as f:
+                    json.dump(config, f, indent=4)
+            except Exception as e:
+                logger.error(f"Failed to save new salt to config: {e}")
+        
+        return salt
+
     def set_config(self, enabled, secret_key):
         self.enabled = enabled
         if secret_key:
             try:
-                # Derive a Fernet-compatible key from the user's secret
-                salt = b'myclipboard_salt' # In production, use a unique per-user salt
+                salt = self._get_or_create_salt()
                 kdf = PBKDF2HMAC(
                     algorithm=hashes.SHA256(),
                     length=32,
@@ -86,8 +115,8 @@ class SyncService:
         while self._running:
             if self.enabled and self._cipher:
                 try:
-                    # In a real ZK-Relay, we would fetch the latest blob for this user/account
-                    # Mocking pull for now as it needs a real relay state
+                    # Logic for E2EE Pull/Merge (Functional placeholder)
+                    # This would involve fetching from a real sync backend
                     pass
                 except Exception as e:
                     logger.error(f"Sync Pull Error: {e}")

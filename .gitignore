@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+venv/
+.myenv/
+.pytest_cache/
+debug.log
+/tmp/myclipboard.sock
